@@ -27,6 +27,18 @@ If you want to use Android Studio or XCode to edit the native code, you can open
 
 To edit the Java or Kotlin files, open `example/android` in Android studio and find the source files at `react-native-voice-to-text` under `Android`.
 
+### Android-specific considerations
+
+When working with the Android native code, keep these important considerations in mind:
+
+1. **Main Thread Operations**: All SpeechRecognizer operations must run on the main thread. Use `mainHandler.post {}` blocks for any code that interacts with the SpeechRecognizer.
+
+2. **Type Conversions**: When passing data between Kotlin and JavaScript, use appropriate React Native bridge types (Arguments.createArray(), Arguments.createMap(), etc.) rather than native Kotlin collections.
+
+3. **Error Handling**: Implement proper error handling for both permission issues and SpeechRecognizer failures.
+
+## Running the example
+
 You can use various commands from the root directory to work with the project.
 
 To start the packager:
@@ -54,6 +66,8 @@ Running "VoiceToTextExample" with {"fabric":true,"initialProps":{"concurrentRoot
 ```
 
 Note the `"fabric":true` and `"concurrentRoot":true` properties.
+
+## Code quality
 
 Make sure your code passes TypeScript and ESLint. Run the following to verify:
 
