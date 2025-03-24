@@ -23,19 +23,21 @@ RCT_EXPORT_MODULE()
         
         // Request permission as early as possible
         [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status) {
-            switch (status) {
-                case SFSpeechRecognizerAuthorizationStatusAuthorized:
-                    break;
-                case SFSpeechRecognizerAuthorizationStatusDenied:
-                    [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Permission denied for speech recognition", @"code": @(-1)}];
-                    break;
-                case SFSpeechRecognizerAuthorizationStatusRestricted:
-                    [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Speech recognition restricted on this device", @"code": @(-2)}];
-                    break;
-                case SFSpeechRecognizerAuthorizationStatusNotDetermined:
-                    [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Speech recognition not authorized", @"code": @(-3)}];
-                    break;
-            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                switch (status) {
+                    case SFSpeechRecognizerAuthorizationStatusAuthorized:
+                        break;
+                    case SFSpeechRecognizerAuthorizationStatusDenied:
+                        [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Permission denied for speech recognition", @"code": @(-1)}];
+                        break;
+                    case SFSpeechRecognizerAuthorizationStatusRestricted:
+                        [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Speech recognition restricted on this device", @"code": @(-2)}];
+                        break;
+                    case SFSpeechRecognizerAuthorizationStatusNotDetermined:
+                        [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Speech recognition not authorized", @"code": @(-3)}];
+                        break;
+                }
+            });
         }];
     }
     return self;
@@ -65,7 +67,7 @@ RCT_EXPORT_MODULE()
 
 - (void)sendEventWithName:(NSString *)name body:(id)body {
     if (hasListeners) {
-        [self.bridge.eventDispatcher sendAppEventWithName:name body:body];
+        [super sendEventWithName:name body:body];
     }
 }
 
@@ -123,9 +125,9 @@ RCT_EXPORT_MODULE()
     
     // Check and request authorization status
     [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status) {
-        switch (status) {
-            case SFSpeechRecognizerAuthorizationStatusAuthorized:
-                dispatch_async(dispatch_get_main_queue(), ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            switch (status) {
+                case SFSpeechRecognizerAuthorizationStatusAuthorized: {
                     NSError *error;
                     // Setup audio session
                     [self setupAudioSession];
@@ -188,14 +190,6 @@ RCT_EXPORT_MODULE()
                             } else {
                                 [self sendEventWithName:@"onSpeechPartialResults" body:params];
                             }
-                            
-                            // Send volume updates (if any listeners registered)
-                            if ([eventListeners[@"onSpeechVolumeChanged"] intValue] > 0) {
-                                float powerLevel = [inputNode averagePowerLevelForBus:0];
-                                dispatch_async(dispatch_get_main_queue(), ^{
-                                    [self sendEventWithName:@"onSpeechVolumeChanged" body:@{@"value": @(powerLevel)}];
-                                });
-                            }
                         }
                         
                         if (error || isFinal) {
@@ -234,6 +228,19 @@ RCT_EXPORT_MODULE()
                             });
                         }
                         
+                        // Calculate and send volume updates if requested
+                        if ([eventListeners[@"onSpeechVolumeChanged"] intValue] > 0) {
+                            float *channelData = buffer.floatChannelData[0];
+                            float sum = 0.0f;
+                            for (UInt32 i = 0; i < buffer.frameLength; i++) {
+                                sum += channelData[i] * channelData[i];
+                            }
+                            float rms = sqrt(sum / buffer.frameLength);
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                [self sendEventWithName:@"onSpeechVolumeChanged" body:@{@"value": @(rms)}];
+                            });
+                        }
+                        
                         [self.recognitionRequest appendAudioPCMBuffer:buffer];
                     }];
                     
@@ -252,21 +259,22 @@ RCT_EXPORT_MODULE()
                     self.isListening = YES;
                     [self sendEventWithName:@"onSpeechStart" body:nil];
                     resolve(@"Started listening");
-                });
-                break;
-                
-            case SFSpeechRecognizerAuthorizationStatusDenied:
-                reject(@"PERMISSION_DENIED", @"Speech recognition permission denied", nil);
-                break;
-                
-            case SFSpeechRecognizerAuthorizationStatusRestricted:
-                reject(@"PERMISSION_RESTRICTED", @"Speech recognition restricted on this device", nil);
-                break;
-                
-            case SFSpeechRecognizerAuthorizationStatusNotDetermined:
-                reject(@"PERMISSION_NOT_DETERMINED", @"Speech recognition permission not determined", nil);
-                break;
-        }
+                    break;
+                }
+                    
+                case SFSpeechRecognizerAuthorizationStatusDenied:
+                    reject(@"PERMISSION_DENIED", @"Speech recognition permission denied", nil);
+                    break;
+                    
+                case SFSpeechRecognizerAuthorizationStatusRestricted:
+                    reject(@"PERMISSION_RESTRICTED", @"Speech recognition restricted on this device", nil);
+                    break;
+                    
+                case SFSpeechRecognizerAuthorizationStatusNotDetermined:
+                    reject(@"PERMISSION_NOT_DETERMINED", @"Speech recognition permission not determined", nil);
+                    break;
+            }
+        });
     }];
     
     return nil;
