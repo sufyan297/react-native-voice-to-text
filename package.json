@@ -1,6 +1,6 @@
 {
-  "name": "@appcitor/react-native-voice-to-text",
-  "version": "0.2.1",
+  "name": "@ascendtis/react-native-voice-to-text",
+  "version": "0.2.2",
   "description": "This can use to convert voice to text real time in device",
   "source": "./src/index.tsx",
   "main": "./lib/commonjs/index.js",
@@ -64,12 +64,12 @@
     "type": "git",
     "url": "git+https://github.com/ChathuraLiyanapathirana/react-native-voice-to-text.git"
   },
-  "author": "ChathuraBuddhika <cbuddhika3@gmail.com> (https://github.com/ChathuraLiyanapathirana)",
+  "author": "Mohammed Sufyan <sufyan297@gmail.com> (https://github.com/sufyan297)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/ChathuraLiyanapathirana/react-native-voice-to-text/issues"
+    "url": "https://github.com/sufyan297/react-native-voice-to-text/issues"
   },
-  "homepage": "https://github.com/ChathuraLiyanapathirana/react-native-voice-to-text#readme",
+  "homepage": "https://github.com/sufyan297/react-native-voice-to-text#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"

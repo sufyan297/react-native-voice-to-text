@@ -1,24 +1,11 @@
-import { NativeEventEmitter } from 'react-native';
-import VoiceToText from './NativeVoiceToText';
+import { NativeModules, NativeEventEmitter } from 'react-native';
 
-export const VoiceToTextEvents = {
-  START: 'onSpeechStart',
-  BEGIN: 'onSpeechBegin',
-  END: 'onSpeechEnd',
-  ERROR: 'onSpeechError',
-  RESULTS: 'onSpeechResults',
-  PARTIAL_RESULTS: 'onSpeechPartialResults',
-  VOLUME_CHANGED: 'onSpeechVolumeChanged',
-  AUDIO_BUFFER: 'onSpeechAudioBuffer',
-  EVENT: 'onSpeechEvent',
-};
-
-const voiceToTextEmitter = new NativeEventEmitter(VoiceToText as any);
+const { VoiceToText } = NativeModules;
+const emitter = new NativeEventEmitter(VoiceToText);
 
 export function startListening(): Promise<string> {
   return VoiceToText.startListening();
 }
-
 export function stopListening(): Promise<string> {
   return VoiceToText.stopListening();
 }
@@ -47,22 +34,9 @@ export function addEventListener(
   eventName: string,
   handler: (event: any) => void
 ) {
-  return voiceToTextEmitter.addListener(eventName, handler);
+  return emitter.addListener(eventName, handler);
 }
 
 export function removeAllListeners(eventName: string) {
-  voiceToTextEmitter.removeAllListeners(eventName);
+  emitter.removeAllListeners(eventName);
 }
-
-export default {
-  startListening,
-  stopListening,
-  destroy,
-  getRecognitionLanguage,
-  setRecognitionLanguage,
-  isRecognitionAvailable,
-  getSupportedLanguages,
-  addEventListener,
-  removeAllListeners,
-  ...VoiceToTextEvents,
-};

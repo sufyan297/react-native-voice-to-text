@@ -3,16 +3,18 @@
 #import <Speech/Speech.h>
 #import <React/RCTLog.h>
 
-@interface VoiceToText ()
-
-@property (nonatomic, copy) RCTPromiseResolveBlock stopPromiseResolve;
-@property (nonatomic, copy) RCTPromiseRejectBlock stopPromiseReject;
-@property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *eventListeners;
-
-@end
-
 @implementation VoiceToText {
     bool hasListeners;
+
+    AVAudioEngine *_audioEngine;
+    SFSpeechAudioBufferRecognitionRequest *_recognitionRequest;
+    SFSpeechRecognitionTask *_recognitionTask;
+    SFSpeechRecognizer *_speechRecognizer;
+    AVAudioInputNode *_inputNode;
+
+    NSString *_finalTranscript;
+    bool _isStopped;
+    NSTimer *_silenceTimer;
 }
 
 RCT_EXPORT_MODULE(VoiceToText)
@@ -24,62 +26,75 @@ RCT_EXPORT_MODULE(VoiceToText)
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _isListening = NO;
-        _audioEngine = [[AVAudioEngine alloc] init];
-        self.eventListeners = [NSMutableDictionary new];
-
-        [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                switch (status) {
-                    case SFSpeechRecognizerAuthorizationStatusAuthorized:
-                        break;
-                    case SFSpeechRecognizerAuthorizationStatusDenied:
-                        [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Permission denied", @"code": @(-1)}];
-                        break;
-                    case SFSpeechRecognizerAuthorizationStatusRestricted:
-                        [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Restricted", @"code": @(-2)}];
-                        break;
-                    case SFSpeechRecognizerAuthorizationStatusNotDetermined:
-                        [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Not determined", @"code": @(-3)}];
-                        break;
-                }
-            });
-        }];
+        [self requestPermissionsAndSetupAudio];
     }
     return self;
 }
 
 - (NSArray<NSString *> *)supportedEvents {
     return @[
-        @"onSpeechStart",
-        @"onSpeechBegin",
-        @"onSpeechEnd",
-        @"onSpeechResults",
-        @"onSpeechPartialResults",
-        @"onSpeechError",
-        @"onSpeechVolumeChanged",
-        @"onSpeechEvent",
-        @"onSpeechAudioBuffer"
+      @"onSpeechStart",
+      @"onSpeechResults",
+      @"onSpeechPartialResults",
+      @"onSpeechEnd",
+      @"onSpeechError",
+      @"onTestEvent"
     ];
 }
 
 - (void)startObserving {
     hasListeners = YES;
+    NSLog(@"✅ startObserving called");
 }
 
 - (void)stopObserving {
     hasListeners = NO;
+    NSLog(@"❌ stopObserving called");
 }
 
 - (void)sendEventWithName:(NSString *)name body:(id)body {
     if (hasListeners) {
         [super sendEventWithName:name body:body];
+    } else {
+        NSLog(@"❌ No listeners for event %@", name);
     }
+}
+
+- (void)requestPermissionsAndSetupAudio {
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+
+    [session requestRecordPermission:^(BOOL granted) {
+        if (!granted) {
+            [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Microphone permission denied", @"code": @(-10)}];
+            return;
+        }
+
+        [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                switch (status) {
+                    case SFSpeechRecognizerAuthorizationStatusAuthorized:
+                        RCTLogInfo(@"Permissions granted");
+                        [self setupAudioSession];
+                        break;
+                    case SFSpeechRecognizerAuthorizationStatusDenied:
+                        [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Speech permission denied", @"code": @(-11)}];
+                        break;
+                    case SFSpeechRecognizerAuthorizationStatusRestricted:
+                        [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Speech recognition restricted", @"code": @(-12)}];
+                        break;
+                    case SFSpeechRecognizerAuthorizationStatusNotDetermined:
+                        [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Speech permission not determined", @"code": @(-13)}];
+                        break;
+                }
+            });
+        }];
+    }];
 }
 
 - (void)setupAudioSession {
     NSError *error = nil;
     AVAudioSession *audioSession = [AVAudioSession sharedInstance];
+
     [audioSession setCategory:AVAudioSessionCategoryRecord error:&error];
     if (error) {
         [self sendEventWithName:@"onSpeechError" body:@{@"message": error.localizedDescription, @"code": @(-100)}];
@@ -95,212 +110,173 @@ RCT_EXPORT_MODULE(VoiceToText)
     [audioSession setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:&error];
     if (error) {
         [self sendEventWithName:@"onSpeechError" body:@{@"message": error.localizedDescription, @"code": @(-102)}];
+        return;
     }
+    NSLog(@"✅ Audio session setup complete");
+    RCTLogInfo(@"Audio session setup complete");
+}
+
+- (void)resetSilenceTimer {
+    if (_isStopped) return;
+    [_silenceTimer invalidate];
+    _silenceTimer = [NSTimer scheduledTimerWithTimeInterval:2.0
+                                                     target:self
+                                                   selector:@selector(handleSilenceTimeout)
+                                                   userInfo:nil
+                                                    repeats:NO];
+}
+
+- (void)handleSilenceTimeout {
+    NSLog(@"🤫 Silence timeout reached");
+    [self stopRecognitionSession];
 }
 
 RCT_EXPORT_METHOD(startListening:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject)
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
-    if (_isListening) {
-        reject(@"ALREADY_LISTENING", @"Already listening", nil);
-        return;
-    }
+    _isStopped = NO;
+    _finalTranscript = @"";
 
-    NSLocale *locale = [NSLocale currentLocale];
-    _speechRecognizer = [[SFSpeechRecognizer alloc] initWithLocale:locale];
-
-    if (!_speechRecognizer || !_speechRecognizer.isAvailable) {
-        reject(@"NOT_AVAILABLE", @"Recognizer not available", nil);
+    AVAudioSessionRecordPermission micPermission = [[AVAudioSession sharedInstance] recordPermission];
+    if (micPermission != AVAudioSessionRecordPermissionGranted) {
+        [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Microphone permission not granted"}];
+        reject(@"PERMISSION_DENIED", @"Microphone permission denied", nil);
         return;
     }
 
     [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (status != SFSpeechRecognizerAuthorizationStatusAuthorized) {
-                reject(@"PERMISSION_DENIED", @"Not authorized", nil);
+                [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Speech permission denied"}];
+                reject(@"PERMISSION_DENIED", @"Speech permission denied", nil);
                 return;
             }
 
             [self setupAudioSession];
 
-            if (self.recognitionTask) {
-                [self.recognitionTask cancel];
-                self.recognitionTask = nil;
-            }
-
-            self.recognitionRequest = [[SFSpeechAudioBufferRecognitionRequest alloc] init];
-            self.recognitionRequest.shouldReportPartialResults = YES;
-
-            AVAudioInputNode *inputNode = self.audioEngine.inputNode;
-
-            self.recognitionTask = [self.speechRecognizer recognitionTaskWithRequest:self.recognitionRequest
-                                                                    resultHandler:^(SFSpeechRecognitionResult *result, NSError *error) {
-                BOOL isFinal = NO;
-
-                if (result) {
-                    isFinal = result.isFinal;
-
-                    NSString *text = result.bestTranscription.formattedString;
-                    NSMutableArray *transcriptions = [NSMutableArray new];
-
-                    for (SFTranscription *t in result.transcriptions) {
-                        NSMutableDictionary *transcriptionDict = [@{@"text": t.formattedString} mutableCopy];
-                        [transcriptions addObject:transcriptionDict];
-                    }
-
-                    NSDictionary *payload = @{
-                        @"results": @{
-                            @"transcriptions": transcriptions,
-                            @"value": text
-                        },
-                        @"value": text
-                    };
-
-                    if (isFinal) {
-                        [self sendEventWithName:@"onSpeechResults" body:payload];
-                    } else {
-                        [self sendEventWithName:@"onSpeechPartialResults" body:payload];
-                    }
-                }
-
-                if (error || isFinal) {
-                    [self.audioEngine stop];
-                    [inputNode removeTapOnBus:0];
-
-                    self.recognitionRequest = nil;
-                    self.recognitionTask = nil;
-                    self.isListening = NO;
-
-                    if (error) {
-                        [self sendEventWithName:@"onSpeechError" body:@{@"message": error.localizedDescription, @"code": @(error.code)}];
-                        if (self.stopPromiseReject) {
-                            self.stopPromiseReject(@"RECOGNITION_ERROR", error.localizedDescription, error);
-                        }
-                    } else if (isFinal) {
-                        if (self.stopPromiseResolve) {
-                            self.stopPromiseResolve(@"Final result received.");
-                        }
-                    }
-
-                    self.stopPromiseResolve = nil;
-                    self.stopPromiseReject = nil;
-
-                    [self sendEventWithName:@"onSpeechEnd" body:nil];
-                }
-            }];
-
-            [inputNode installTapOnBus:0 bufferSize:1024 format:[inputNode outputFormatForBus:0]
-                                  block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
-                [self.recognitionRequest appendAudioPCMBuffer:buffer];
-            }];
-
-            [self.audioEngine prepare];
-            NSError *audioError = nil;
-            if (![self.audioEngine startAndReturnError:&audioError]) {
-                reject(@"AUDIO_ERROR", audioError.localizedDescription, audioError);
+            _speechRecognizer = [[SFSpeechRecognizer alloc] initWithLocale:[NSLocale currentLocale]];
+            if (!_speechRecognizer.isAvailable) {
+                [self sendEventWithName:@"onSpeechError" body:@{@"message": @"Recognizer not available"}];
+                reject(@"NOT_AVAILABLE", @"Recognizer not available", nil);
                 return;
             }
 
-            self.isListening = YES;
+            _recognitionRequest = [[SFSpeechAudioBufferRecognitionRequest alloc] init];
+            _recognitionRequest.shouldReportPartialResults = YES;
+
+            _audioEngine = [[AVAudioEngine alloc] init];
+            _inputNode = _audioEngine.inputNode;
+
+            AVAudioFormat *format = [_inputNode outputFormatForBus:0];
+            [_inputNode installTapOnBus:0 bufferSize:1024 format:format block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
+                [_recognitionRequest appendAudioPCMBuffer:buffer];
+            }];
+
+            NSError *startError = nil;
+            [_audioEngine prepare];
+            [_audioEngine startAndReturnError:&startError];
+            if (startError) {
+                [self sendEventWithName:@"onSpeechError" body:@{@"message": startError.localizedDescription}];
+                reject(@"ENGINE_ERROR", startError.localizedDescription, startError);
+                return;
+            }
+
             [self sendEventWithName:@"onSpeechStart" body:nil];
-            resolve(@"Started listening");
+
+            _recognitionTask = [_speechRecognizer recognitionTaskWithRequest:_recognitionRequest
+                                                            resultHandler:^(SFSpeechRecognitionResult *result, NSError *error) {
+                if (result) {
+                    NSString *transcript = result.bestTranscription.formattedString;
+                    // _finalTranscript = transcript; //let's store that in variable
+                    _finalTranscript = (transcript.length == 0 && _finalTranscript.length > 0) ? _finalTranscript : transcript;
+                    NSLog(@"✅ Continue Result: %@", _finalTranscript);
+
+                    NSLog(@"isRecognitionStopped? ", _isStopped ? @"YES" : @"NO");
+
+                    if (result.isFinal) {
+                        [self sendEventWithName:@"onSpeechResults" body:@{@"value": _finalTranscript ?: @""}];
+                        // [self stopRecognitionSession];
+                        NSLog(@"[BEFORE HITTING FINAL] isRecognitionStopped? ", _isStopped ? @"YES" : @"NO");
+                        NSLog(@"✅ Final Result: %@", transcript);
+                        // Delay stopping to allow result to propagate
+                        [self resetSilenceTimer];
+                        [self stopRecognitionSession];
+                    } else {
+                        NSLog(@"[BEFORE HITTING PARTIAL] isRecognitionStopped? %@", _isStopped ? @"YES" : @"NO");
+                        [self sendEventWithName:@"onSpeechPartialResults" body:@{@"value": transcript}];
+                        [self resetSilenceTimer];
+                    }
+                }
+
+                if (error) {
+                    [self sendEventWithName:@"onSpeechError" body:@{@"message": error.localizedDescription}];
+                    [self stopRecognitionSession];
+                }
+            }];
+
+            resolve(@"Listening started");
         });
     }];
 }
 
-RCT_EXPORT_METHOD(stopListening:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
-    if (!_isListening) {
-        reject(@"NOT_LISTENING", @"Not listening", nil);
-        return;
+// - (void)stopRecognitionSession {
+//     if (_audioEngine.isRunning) {
+//         [_audioEngine stop];
+//         [_inputNode removeTapOnBus:0];
+//         [_recognitionRequest endAudio];
+//     }
+
+//     _recognitionRequest = nil;
+//     _recognitionTask = nil;
+//     _speechRecognizer = nil;
+
+//     [self sendEventWithName:@"onSpeechEnd" body:@{@"message": @"Recognition stopped"}];
+// }
+- (void)stopRecognitionSession {
+    if (_isStopped) return;
+    _isStopped = YES;
+
+    if (_silenceTimer) {
+        [_silenceTimer invalidate];
+        _silenceTimer = nil;
     }
 
-    _isListening = NO;
-    [_audioEngine stop];
-    [_audioEngine.inputNode removeTapOnBus:0];
-    [_recognitionRequest endAudio];
+    if (_audioEngine && _audioEngine.isRunning) {
+        [_audioEngine stop];
+        [_inputNode removeTapOnBus:0];
+        [_recognitionRequest endAudio];
+    }
 
-    self.stopPromiseResolve = resolve;
-    self.stopPromiseReject = reject;
-}
-
-RCT_EXPORT_METHOD(destroy:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
-    [_audioEngine stop];
-    [_audioEngine.inputNode removeTapOnBus:0];
+    if (_recognitionTask) {
+        [_recognitionTask cancel];
+        _recognitionTask = nil;
+    }
 
     _recognitionRequest = nil;
-    _recognitionTask = nil;
     _speechRecognizer = nil;
-    _isListening = NO;
+    _audioEngine = nil;
+    _inputNode = nil;
 
-    [self.eventListeners removeAllObjects];
-
-    resolve(@"Speech recognizer destroyed");
-}
-
-- (void)addListener:(NSString *)eventName {
-    NSNumber *count = self.eventListeners[eventName];
-    self.eventListeners[eventName] = @(count ? count.intValue + 1 : 1);
-}
-
-- (void)removeListeners:(double)count {
-    NSInteger removeCount = (NSInteger)count;
-    for (NSString *key in [self.eventListeners allKeys]) {
-        NSInteger current = self.eventListeners[key].intValue;
-        if (current > removeCount) {
-            self.eventListeners[key] = @(current - removeCount);
-        } else {
-            [self.eventListeners removeObjectForKey:key];
-        }
-    }
-}
-
-RCT_EXPORT_METHOD(getRecognitionLanguage:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
-    NSLocale *locale = [NSLocale currentLocale];
-    NSString *language = [locale objectForKey:NSLocaleLanguageCode];
-    NSString *country = [locale objectForKey:NSLocaleCountryCode];
-
-    resolve(country ? [NSString stringWithFormat:@"%@-%@", language, country] : language);
-}
-
-RCT_EXPORT_METHOD(setRecognitionLanguage:(NSString *)languageTag
-                  resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject) {
-    @try {
-        NSLocale *locale = [[NSLocale alloc] initWithLocaleIdentifier:languageTag];
-        _speechRecognizer = [[SFSpeechRecognizer alloc] initWithLocale:locale];
-        if (!_speechRecognizer || !_speechRecognizer.isAvailable) {
-            reject(@"LANGUAGE_ERROR", @"Not available", nil);
-            return;
-        }
-        resolve(@YES);
-    } @catch (NSException *e) {
-        reject(@"LANGUAGE_ERROR", e.reason, nil);
-    }
-}
-
-RCT_EXPORT_METHOD(isRecognitionAvailable:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
-    NSLocale *locale = [NSLocale currentLocale];
-    SFSpeechRecognizer *recognizer = [[SFSpeechRecognizer alloc] initWithLocale:locale];
-    resolve(@(recognizer && recognizer.isAvailable));
-}
-
-RCT_EXPORT_METHOD(getSupportedLanguages:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
-    NSArray *identifiers = @[
-        @"en-US", @"en-GB", @"fr-FR", @"de-DE", @"it-IT", @"es-ES",
-        @"ja-JP", @"ko-KR", @"zh-CN", @"ru-RU", @"pt-BR", @"nl-NL",
-        @"hi-IN", @"ar-SA"
-    ];
-    NSMutableArray *supported = [NSMutableArray new];
-
-    for (NSString *id in identifiers) {
-        NSLocale *locale = [[NSLocale alloc] initWithLocaleIdentifier:id];
-        SFSpeechRecognizer *recognizer = [[SFSpeechRecognizer alloc] initWithLocale:locale];
-        if (recognizer && recognizer.isAvailable) {
-            [supported addObject:id];
-        }
+    NSError *err = nil;
+    [[AVAudioSession sharedInstance] setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:&err];
+    if (err) {
+        NSLog(@"❌ Error deactivating AVAudioSession: %@", err.localizedDescription);
     }
 
-    resolve(supported);
+    [self sendEventWithName:@"onSpeechEnd" body:@{@"message": @"Recognition stopped"}];
 }
 
+RCT_EXPORT_METHOD(stopListening)
+{
+  [self stopRecognitionSession];
+}
+
+RCT_EXPORT_METHOD(fireTestEvent) {
+  NSLog(@"🔥 fireTestEvent called");
+  if (hasListeners) {
+    [self sendEventWithName:@"onTestEvent" body:@{@"message": @"Hello from native!"}];
+  } else {
+    NSLog(@"❌ No listeners active. Skipping event.");
+  }
+}
 @end
