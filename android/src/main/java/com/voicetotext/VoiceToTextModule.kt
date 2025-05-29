@@ -103,11 +103,11 @@ class VoiceToTextModule(reactContext: ReactApplicationContext) :
           SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
           else -> "Unknown error: $error"
         }
-        
+
         val params = Arguments.createMap()
         params.putInt("code", error)
         params.putString("message", errorMessage)
-        
+
         Log.d(TAG, "onError: $errorMessage")
         isListening = false
         sendEvent("onSpeechError", params)
@@ -116,13 +116,13 @@ class VoiceToTextModule(reactContext: ReactApplicationContext) :
       override fun onResults(results: Bundle?) {
         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
         val confidence = results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
-        
+
         val params = Arguments.createMap()
-        
+
         if (matches != null) {
           val resultsMap = Arguments.createMap()
           val transcriptions = Arguments.createArray()
-          
+
           for (i in matches.indices) {
             val transcriptionMap = Arguments.createMap()
             transcriptionMap.putString("text", matches[i])
@@ -133,13 +133,13 @@ class VoiceToTextModule(reactContext: ReactApplicationContext) :
             }
             transcriptions.pushMap(transcriptionMap)
           }
-          
+
           resultsMap.putArray("transcriptions", transcriptions)
           params.putMap("results", resultsMap)
-          
+
           params.putString("value", matches.firstOrNull() ?: "")
         }
-        
+
         Log.d(TAG, "onResults: ${matches?.firstOrNull()}")
         isListening = false
         sendEvent("onSpeechResults", params)
@@ -147,25 +147,25 @@ class VoiceToTextModule(reactContext: ReactApplicationContext) :
 
       override fun onPartialResults(partialResults: Bundle?) {
         val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-        
+
         val params = Arguments.createMap()
-        
+
         if (matches != null) {
           val resultsMap = Arguments.createMap()
           val transcriptions = Arguments.createArray()
-          
+
           for (i in matches.indices) {
             val transcriptionMap = Arguments.createMap()
             transcriptionMap.putString("text", matches[i])
             transcriptions.pushMap(transcriptionMap)
           }
-          
+
           resultsMap.putArray("transcriptions", transcriptions)
           params.putMap("results", resultsMap)
-          
+
           params.putString("value", matches.firstOrNull() ?: "")
         }
-        
+
         Log.d(TAG, "onPartialResults: ${matches?.firstOrNull()}")
         sendEvent("onSpeechPartialResults", params)
       }
@@ -174,7 +174,7 @@ class VoiceToTextModule(reactContext: ReactApplicationContext) :
         if (params != null) {
           val eventParams = Arguments.createMap()
           eventParams.putInt("eventType", eventType)
-          
+
           for (key in params.keySet()) {
             val value = params.get(key)
             when (value) {
@@ -184,12 +184,12 @@ class VoiceToTextModule(reactContext: ReactApplicationContext) :
               is Boolean -> eventParams.putBoolean(key, value)
             }
           }
-          
+
           sendEvent("onSpeechEvent", eventParams)
         }
       }
     }
-    
+
     speechRecognizer?.setRecognitionListener(recognitionListener)
   }
 
@@ -247,13 +247,13 @@ class VoiceToTextModule(reactContext: ReactApplicationContext) :
         promise.reject("NOT_AVAILABLE", "Speech recognition is not available on this device")
         return@post
       }
-  
+
       if (!isListening) {
         Log.d(TAG, "stopListening: Speech recognition not in progress")
         promise.resolve("Not listening")
         return@post
       }
-  
+
       try {
         speechRecognizer?.stopListening()
         isListening = false
@@ -280,27 +280,36 @@ class VoiceToTextModule(reactContext: ReactApplicationContext) :
 
   @ReactMethod
   override fun addListener(eventName: String) {
-    val count = eventListeners.getOrDefault(eventName, 0)
-    eventListeners[eventName] = count + 1
-    
-    Log.d(TAG, "addListener: Added listener for $eventName, total: ${eventListeners[eventName]}")
+    try {
+      val count = eventListeners.getOrDefault(eventName, 0)
+      eventListeners[eventName] = count + 1
+
+      Log.d(TAG, "addListener: Added listener for $eventName, total: ${eventListeners[eventName]}")
+    }
+    catch(e: Exception) {
+      Log.d(TAG, "addListener: exception: total: ${e.message}", e)
+    }
   }
 
   @ReactMethod
   override fun removeListeners(count: Double) {
-    val countInt = count.toInt()
-    
-    for (eventName in eventListeners.keys) {
-      val currentCount = eventListeners[eventName] ?: 0
-      val newCount = maxOf(0, currentCount - countInt)
-      if (newCount > 0) {
-        eventListeners[eventName] = newCount
-      } else {
-        eventListeners.remove(eventName)
+    try {
+      val countInt = count.toInt()
+
+      for (eventName in eventListeners.keys) {
+        val currentCount = eventListeners[eventName] ?: 0
+        val newCount = maxOf(0, currentCount - countInt)
+        if (newCount > 0) {
+          eventListeners[eventName] = newCount
+        } else {
+          eventListeners.remove(eventName)
+        }
       }
+
+      Log.d(TAG, "removeListeners: Removed $count listeners, remaining events: ${eventListeners.keys.joinToString()}")
+    } catch(e: Exception) {
+      Log.e(TAG, "removeListeners exception: ${e.message}", e)
     }
-    
-    Log.d(TAG, "removeListeners: Removed $count listeners, remaining events: ${eventListeners.keys.joinToString()}")
   }
 
   @ReactMethod
@@ -320,18 +329,18 @@ class VoiceToTextModule(reactContext: ReactApplicationContext) :
         try {
           recognizerIntent?.putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
           recognizerIntent?.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, languageTag)
-          
+
           val locale = if (languageTag.contains("-")) {
             val parts = languageTag.split("-")
             Locale(parts[0], parts[1])
           } else {
             Locale(languageTag)
           }
-          
+
           speechRecognizer?.destroy()
           speechRecognizer = SpeechRecognizer.createSpeechRecognizer(reactApplicationContext)
           speechRecognizer?.setRecognitionListener(recognitionListener)
-          
+
           promise.resolve(true)
         } catch (e: Exception) {
           Log.e(TAG, "Error setting language: $languageTag", e)
@@ -355,16 +364,16 @@ class VoiceToTextModule(reactContext: ReactApplicationContext) :
     try {
       // Create an array that's compatible with React Native bridge
       val languages = Arguments.createArray()
-      
+
       // Add common supported languages
       listOf(
-        "en-US", "en-GB", "fr-FR", "de-DE", "it-IT", "es-ES", 
+        "en-US", "en-GB", "fr-FR", "de-DE", "it-IT", "es-ES",
         "ja-JP", "ko-KR", "zh-CN", "ru-RU", "pt-BR", "nl-NL",
         "hi-IN", "ar-SA"
       ).forEach { language ->
         languages.pushString(language)
       }
-      
+
       promise.resolve(languages)
     } catch (e: Exception) {
       Log.e(TAG, "Error getting supported languages", e)
