@@ -1,6 +1,6 @@
 {
   "name": "@ascendtis/react-native-voice-to-text",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "This can use to convert voice to text real time in device",
   "source": "./src/index.tsx",
   "main": "./lib/commonjs/index.js",
