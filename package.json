@@ -62,7 +62,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ChathuraLiyanapathirana/react-native-voice-to-text.git"
+    "url": "git+https://github.com/sufyan297/react-native-voice-to-text.git"
   },
   "author": "Mohammed Sufyan <sufyan297@gmail.com> (https://github.com/sufyan297)",
   "license": "MIT",
