@@ -19,6 +19,7 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.util.*
+import android.util.Base64  // Make sure this import is added
 
 @ReactModule(name = VoiceToTextModule.NAME)
 class VoiceToTextModule(reactContext: ReactApplicationContext) :
@@ -77,10 +78,19 @@ class VoiceToTextModule(reactContext: ReactApplicationContext) :
         }
       }
 
+      //@depcrecated
+      // override fun onBufferReceived(buffer: ByteArray?) {
+      //   if (buffer != null && eventListeners.containsKey("onSpeechAudioBuffer") && eventListeners["onSpeechAudioBuffer"]!! > 0) {
+      //     val params = Arguments.createMap()
+      //     params.putString("buffer", Base64.getEncoder().encodeToString(buffer))
+      //     sendEvent("onSpeechAudioBuffer", params)
+      //   }
+      // }
       override fun onBufferReceived(buffer: ByteArray?) {
         if (buffer != null && eventListeners.containsKey("onSpeechAudioBuffer") && eventListeners["onSpeechAudioBuffer"]!! > 0) {
           val params = Arguments.createMap()
-          params.putString("buffer", Base64.getEncoder().encodeToString(buffer))
+          val encodedBuffer = Base64.encodeToString(buffer, Base64.NO_WRAP)
+          params.putString("buffer", encodedBuffer)
           sendEvent("onSpeechAudioBuffer", params)
         }
       }
