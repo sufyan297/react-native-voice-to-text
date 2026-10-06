@@ -11,7 +11,7 @@ import {
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
-import VoiceToText, { VoiceToTextEvents } from 'react-native-voice-to-text';
+import * as VoiceToText from 'react-native-voice-to-text';
 
 export default function App() {
   const [results, setResults] = useState('');
@@ -124,7 +124,7 @@ export default function App() {
 
     // Setup event listeners
     const speechStartSubscription = VoiceToText.addEventListener(
-      VoiceToTextEvents.START,
+      'onSpeechStart',
       () => {
         setIsListening(true);
         console.log('Speech recognition started');
@@ -132,7 +132,7 @@ export default function App() {
     );
 
     const speechEndSubscription = VoiceToText.addEventListener(
-      VoiceToTextEvents.END,
+      'onSpeechEnd',
       () => {
         setIsListening(false);
         console.log('Speech recognition ended');
@@ -140,24 +140,24 @@ export default function App() {
     );
 
     const speechResultsSubscription = VoiceToText.addEventListener(
-      VoiceToTextEvents.RESULTS,
-      (event) => {
+      'onSpeechResults',
+      (event: { value?: string }) => {
         setResults(event.value || '');
         console.log('Speech results:', event);
       }
     );
 
     const speechPartialResultsSubscription = VoiceToText.addEventListener(
-      VoiceToTextEvents.PARTIAL_RESULTS,
-      (event) => {
+      'onSpeechPartialResults',
+      (event: { value?: string }) => {
         setResults(event.value || '');
         console.log('Partial results:', event);
       }
     );
 
     const speechErrorSubscription = VoiceToText.addEventListener(
-      VoiceToTextEvents.ERROR,
-      (event) => {
+      'onSpeechError',
+      (event: { value?: string }) => {
         console.error('Speech recognition error:', event);
         Alert.alert('Error', 'Speech recognition error occurred');
         setIsListening(false);
