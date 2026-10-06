@@ -11,8 +11,17 @@ const root = path.resolve(__dirname, '..');
  *
  * @type {import('metro-config').MetroConfig}
  */
-module.exports = getConfig(getDefaultConfig(__dirname), {
+const config = getConfig(getDefaultConfig(__dirname), {
   root,
   pkg,
   project: __dirname,
 });
+
+// The example does not install the library into its own node_modules, so map
+// its package name directly to the monorepo root for Metro resolution.
+config.resolver.extraNodeModules = {
+  ...config.resolver.extraNodeModules,
+  [pkg.name]: root,
+};
+
+module.exports = config;

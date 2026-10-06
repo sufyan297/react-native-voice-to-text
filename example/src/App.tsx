@@ -11,7 +11,7 @@ import {
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
-import * as VoiceToText from 'react-native-voice-to-text';
+import * as VoiceToText from '@ascendtis/react-native-voice-to-text';
 
 export default function App() {
   const [results, setResults] = useState('');
