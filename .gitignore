@@ -72,6 +72,7 @@ android/keystores/debug.keystore
 # Expo
 .expo/
 .zcode/
+.zcodeignore
 # Turborepo
 .turbo/
 
